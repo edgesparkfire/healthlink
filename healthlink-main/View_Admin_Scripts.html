@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Code View — script.js</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.24.1/themes/prism-tomorrow.min.css" rel="stylesheet" />
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #1a1a1a;
+            color: #fff;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #333;
+            padding-bottom: 10px;
+        }
+
+        .btn {
+            background: #2C8EF8;
+            color: #fff;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        pre {
+            border-radius: 12px;
+            font-size: 14px;
+            background: #2d2d2d !important;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="header">
+        <h2>📜 script.js (Admin Logic)</h2>
+        <a href="INDEX.html" class="btn">← Back to Index</a>
+    </div>
+    <pre><code class="language-javascript">
+/* ========================================================
+   HealthLink – Validation & Form Submission Logic
+   (Now with Flask backend integration via fetch API)
+   ======================================================== */
+
+const API_BASE = 'http://localhost:5000/api';
+
+document.addEventListener('DOMContentLoaded', () => {
+
+    // ── Element References ──
+    const patientForm = document.getElementById('patientForm');
+    const appointmentForm = document.getElementById('appointmentForm');
+    const vitalsForm = document.getElementById('vitalsForm');
+    const toast = document.getElementById('toast');
+    const toastMessage = document.getElementById('toastMessage');
+    const searchInput = document.getElementById('searchPatient');
+    const attendBtn = document.getElementById('attendBtn');
+
+    // ── Utility: Show Toast ──
+    function showToast(message, isError = false) {
+        toastMessage.textContent = message;
+        toast.querySelector('.toast__icon').textContent = isError ? '❌' : '✅';
+        toast.style.background = isError ? '#e74c3c' : '#27ae60';
+        toast.classList.add('toast--visible');
+        setTimeout(() => toast.classList.remove('toast--visible'), 3000);
+    }
+
+    // ── Utility: Show / Clear Errors ──
+    function showError(containerId, msg) {
+        const container = document.getElementById(containerId);
+        container.style.display = 'block';
+        container.querySelector('.error-msg').textContent = msg;
+    }
+
+    function clearError(containerId) {
+        const container = document.getElementById(containerId);
+        container.style.display = 'none';
+        container.querySelector('.error-msg').textContent = '';
+    }
+
+    function clearInputErrors(form) {
+        form.querySelectorAll('.input-error').forEach(el => el.classList.remove('input-error'));
+    }
+
+    function markInvalid(input) {
+        input.classList.add('input-error');
+    }
+
+
+    // ══════════════════════════════════════
+    //  LOAD EXISTING DATA FROM SERVER
+    // ══════════════════════════════════════
+    async function loadStats() {
+        try {
+            const res = await fetch(`${API_BASE}/stats`);
+            const data = await res.json();
+            if (data.success) {
+                const s = data.stats;
+                document.getElementById('statTotalPatients').textContent = s.totalPatients;
+                document.getElementById('statPendingAppts').textContent = s.pendingAppointments;
+                document.getElementById('statConfirmedAppts').textContent = s.confirmedAppointments;
+                document.getElementById('statCriticalVitals').textContent = s.criticalVitals;
+
+                // Color critical count if > 0
+                const critCard = document.querySelector('.stat-card--critical');
+                if (s.criticalVitals > 0) critCard.style.border = '1px solid #e74c3c';
+                else critCard.style.border = '1px solid var(--clr-border)';
+            }
+        } catch (e) {
+            console.warn('Could not load stats:', e.message);
+        }
+    }
+
+    async function loadAppointments() {
+        try {
+            const res = await fetch(`${API_BASE}/appointments`);
+            const data = await res.json();
+            const tbody = document.querySelector('#appointmentsTable tbody');
+            tbody.innerHTML = '';
+            data.forEach(a => {
+                const pid = a.patientId || a.patient_id;
+                const doc = a.doctorName || a.doctor_name;
+                const badgeClass = a.status === 'Confirmed' ? 'badge--confirmed' : 'badge--pending';
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${pid}</td>
+                    <td>${doc}</td>
+                    <td>${a.date}</td>
+                    <td><span class="badge ${badgeClass}">${a.status}</span></td>
+                `;
+                tbody.appendChild(tr);
+            });
+            loadStats(); // Update stats whenever table changes
+        } catch (e) {
+            console.warn('Could not load appointments:', e.message);
+        }
+    }
+
+    async function loadVitals() {
+        try {
+            const res = await fetch(`${API_BASE}/vitals`);
+            const data = await res.json();
+            const tbody = document.querySelector('#vitalsTable tbody');
+            tbody.innerHTML = '';
+            data.forEach(v => {
+                const pid = v.patientId || v.patient_id;
+                const hr = v.heartRate || v.heart_rate;
+                const bp = v.bloodPressure || v.blood_pressure;
+                const hrClass = (hr > 100 || hr < 60) ? 'hr-warning' : ''; // Matches patient dash ranges now
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${pid}</td>
+                    <td class="${hrClass}">${hr}</td>
+                    <td>${bp}</td>
+                    <td>${v.temperature}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+            loadStats(); // Update stats
+        } catch (e) {
+            console.warn('Could not load vitals:', e.message);
+        }
+    }
+
+    // Load data on page open
+    loadStats();
+    loadAppointments();
+    loadVitals();
+
+
+    // ══════════════════════════════════════
+    //  1. PATIENT REGISTRATION
+    // ══════════════════════════════════════
+    patientForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        clearError('patientError');
+        clearInputErrors(patientForm);
+
+        const fullName = patientForm.fullName.value.trim();
+        const age = patientForm.age.value.trim();
+        const gender = patientForm.gender.value;
+        const phone = patientForm.phone.value.trim();
+
+        // Client-side validation
+        if (!fullName) { markInvalid(patientForm.fullName); showError('patientError', 'Full Name is required.'); return; }
+        if (!/^[a-zA-Z\s.'-]+$/.test(fullName)) { markInvalid(patientForm.fullName); showError('patientError', 'Name must contain only letters and spaces.'); return; }
+        if (!age || isNaN(age)) { markInvalid(patientForm.age); showError('patientError', 'Please enter a valid numeric age.'); return; }
+        const ageNum = parseInt(age, 10);
+        if (ageNum < 0 || ageNum > 150) { markInvalid(patientForm.age); showError('patientError', 'Age must be between 0 and 150.'); return; }
+        if (!gender) { markInvalid(patientForm.gender); showError('patientError', 'Please select a gender.'); return; }
+        if (!phone) { markInvalid(patientForm.phone); showError('patientError', 'Phone number is required.'); return; }
+        if (!/^[+\d\s()-]{7,20}$/.test(phone)) { markInvalid(patientForm.phone); showError('patientError', 'Enter a valid phone number (7-20 digits).'); return; }
+
+        // ── Send to backend ──
+        try {
+            const res = await fetch(`${API_BASE}/patients`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fullName, age: ageNum, gender, phone })
+            });
+            const result = await res.json();
+
+            if (result.success) {
+                showToast(`Patient "${fullName}" registered as ${result.patient.id}`);
+                console.log('✅ Patient Registered:', result.patient);
+                patientForm.reset();
+            } else {
+                showError('patientError', result.errors.join(' '));
+            }
+        } catch (err) {
+            showError('patientError', 'Server error — is the backend running? (python server.py)');
+            console.error(err);
+        }
+    });
+
+
+    // ══════════════════════════════════════
+    //  2. APPOINTMENT BOOKING
+    // ══════════════════════════════════════
+    appointmentForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        clearError('appointmentError');
+        clearInputErrors(appointmentForm);
+
+        const patientId = appointmentForm.apptPatientId.value.trim();
+        const doctorName = appointmentForm.doctorName.value;
+        const date = appointmentForm.apptDate.value;
+
+        // Client-side validation
+        if (!patientId) { markInvalid(appointmentForm.apptPatientId); showError('appointmentError', 'Patient ID is required.'); return; }
+        if (!/^PID-\d+$/i.test(patientId)) { markInvalid(appointmentForm.apptPatientId); showError('appointmentError', 'Patient ID must be in format PID-XXXXX.'); return; }
+        if (!doctorName) { markInvalid(appointmentForm.doctorName); showError('appointmentError', 'Please select a doctor.'); return; }
+        if (!date) { markInvalid(appointmentForm.apptDate); showError('appointmentError', 'Appointment date is required.'); return; }
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+        if (new Date(date) < today) { markInvalid(appointmentForm.apptDate); showError('appointmentError', 'Date cannot be in the past.'); return; }
+
+        // ── Send to backend ──
+        try {
+            const res = await fetch(`${API_BASE}/appointments`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ patientId, doctorName, date })
+            });
+            const result = await res.json();
+
+            if (result.success) {
+                showToast(`Appointment booked for ${patientId} with ${doctorName}`);
+                console.log('✅ Appointment Booked:', result.appointment);
+                appointmentForm.reset();
+                loadAppointments(); // Refresh table from server
+            } else {
+                showError('appointmentError', result.errors.join(' '));
+            }
+        } catch (err) {
+            showError('appointmentError', 'Server error — is the backend running? (python server.py)');
+            console.error(err);
+        }
+    });
+
+
+    // ══════════════════════════════════════
+    //  3. VITALS ENTRY
+    // ══════════════════════════════════════
+    vitalsForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        clearError('vitalsError');
+        clearInputErrors(vitalsForm);
+
+        const patientId = vitalsForm.vitalsPatientId.value.trim();
+        const heartRateRaw = vitalsForm.heartRate.value.trim();
+        const bloodPressure = vitalsForm.bloodPressure.value.trim();
+        const temperatureRaw = vitalsForm.temperature.value.trim();
+
+        // Client-side validation
+        if (!patientId) { markInvalid(vitalsForm.vitalsPatientId); showError('vitalsError', 'Patient ID is required.'); return; }
+
+        if (!heartRateRaw || isNaN(heartRateRaw)) { markInvalid(vitalsForm.heartRate); showError('vitalsError', 'Heart Rate must be a valid number.'); return; }
+        const hr = parseFloat(heartRateRaw);
+        if (hr <= 40 || hr >= 150) {
+            markInvalid(vitalsForm.heartRate);
+            showError('vitalsError', `Heart Rate ${hr} BPM is outside the normal range (40–150 BPM). Please verify.`);
+            // Update alert card
+            const alertDesc = document.getElementById('alertDescription');
+            const alertVal = document.getElementById('alertValue');
+            alertDesc.innerHTML = `Patient <strong>${patientId}</strong> has reported a critically ${hr >= 150 ? 'high' : 'low'} heart rate!`;
+            alertVal.innerHTML = `Heart Rate: <span class="highlight-red">${hr} BPM</span>`;
+            return;
+        }
+
+        if (!bloodPressure) { markInvalid(vitalsForm.bloodPressure); showError('vitalsError', 'Blood Pressure is required.'); return; }
+        const bpMatch = bloodPressure.match(/^(\d{2,3})\s*\/\s*(\d{2,3})$/);
+        if (!bpMatch) { markInvalid(vitalsForm.bloodPressure); showError('vitalsError', 'BP must be in format like 120/80.'); return; }
+        const systolic = parseInt(bpMatch[1], 10), diastolic = parseInt(bpMatch[2], 10);
+        if (systolic < 70 || systolic > 250 || diastolic < 40 || diastolic > 150) { markInvalid(vitalsForm.bloodPressure); showError('vitalsError', `BP ${systolic}/${diastolic} is outside expected range.`); return; }
+
+        if (!temperatureRaw || isNaN(temperatureRaw)) { markInvalid(vitalsForm.temperature); showError('vitalsError', 'Temperature must be a valid number.'); return; }
+        const temp = parseFloat(temperatureRaw);
+        if (temp < 34 || temp > 42) { markInvalid(vitalsForm.temperature); showError('vitalsError', `Temperature ${temp}°C is outside the normal range (34–42°C).`); return; }
+
+        // ── Send to backend ──
+        try {
+            const res = await fetch(`${API_BASE}/vitals`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ patientId, heartRate: hr, bloodPressure, temperature: temp })
+            });
+            const result = await res.json();
+
+            if (result.success) {
+                showToast(`Vitals recorded for ${patientId}`);
+                console.log('✅ Vitals Submitted:', result.vital);
+                vitalsForm.reset();
+                loadVitals(); // Refresh table from server
+
+                // Show alert if critical
+                if (result.alert) {
+                    const alertDesc = document.getElementById('alertDescription');
+                    const alertVal = document.getElementById('alertValue');
+                    const alertCard = document.getElementById('alertCard');
+                    alertDesc.innerHTML = `Patient <strong>${result.alert.patientId}</strong> has reported a critically ${result.alert.type} heart rate!`;
+                    alertVal.innerHTML = `Heart Rate: <span class="highlight-red">${result.alert.heartRate} BPM</span>`;
+                    alertCard.style.opacity = '1';
+                    alertCard.style.pointerEvents = 'auto';
+                }
+            } else {
+                showError('vitalsError', result.errors.join(' '));
+            }
+        } catch (err) {
+            showError('vitalsError', 'Server error — is the backend running? (python server.py)');
+            console.error(err);
+        }
+    });
+
+
+    // ══════════════════════════════════════
+    //  SEARCH FILTER
+    // ══════════════════════════════════════
+    searchInput.addEventListener('input', () => {
+        const query = searchInput.value.trim().toLowerCase();
+        document.querySelectorAll('#appointmentsTable tbody tr').forEach(row => {
+            const id = row.querySelector('td')?.textContent.toLowerCase() || '';
+            row.style.display = id.includes(query) ? '' : 'none';
+        });
+        document.querySelectorAll('#vitalsTable tbody tr').forEach(row => {
+            const id = row.querySelector('td')?.textContent.toLowerCase() || '';
+            row.style.display = id.includes(query) ? '' : 'none';
+        });
+    });
+
+
+    // ══════════════════════════════════════
+    //  ATTEND ALERT BUTTON
+    // ══════════════════════════════════════
+    attendBtn.addEventListener('click', () => {
+        showToast('Alert acknowledged. Patient flagged for immediate attention.');
+        const alertCard = document.getElementById('alertCard');
+        alertCard.style.opacity = '0.5';
+        alertCard.style.pointerEvents = 'none';
+    });
+
+    // ── Fade-in keyframes ──
+    const style = document.createElement('style');
+    style.textContent = `@keyframes fadeIn { from { opacity:0; transform:translateY(-8px); } to { opacity:1; transform:translateY(0); } }`;
+    document.head.appendChild(style);
+
+});
+</code></pre>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.24.1/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.24.1/components/prism-javascript.min.js"></script>
+</body>
+
+</html>

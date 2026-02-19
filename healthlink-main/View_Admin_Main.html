@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Code View — index.html</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.24.1/themes/prism-tomorrow.min.css" rel="stylesheet" />
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #1a1a1a;
+            color: #fff;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #333;
+            padding-bottom: 10px;
+        }
+
+        .btn {
+            background: #2C8EF8;
+            color: #fff;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        pre {
+            border-radius: 12px;
+            font-size: 14px;
+            background: #2d2d2d !important;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="header">
+        <h2>📄 index.html (Admin UI)</h2>
+        <a href="INDEX.html" class="btn">← Back to Index</a>
+    </div>
+    <pre><code class="language-markup">
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description"
+        content="HealthLink - Patient Management Dashboard for registration, appointments, and vitals tracking.">
+    <title>HealthLink — Admin Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+
+<body>
+
+    <!-- ===== HEADER ===== -->
+    <header class="header">
+        <div class="header__brand">
+            <span class="header__logo">💙</span>
+            <h1 class="header__title">HealthLink</h1>
+        </div>
+        <div class="header__user">
+            <a href="patient-dashboard.html"
+                style="color:#fff;text-decoration:none;font-size:.88rem;opacity:.9;padding:6px 14px;border:1px solid rgba(255,255,255,.35);border-radius:8px;transition:background .2s;">Patient
+                Dashboard</a>
+            <span class="header__user-label">Admin Dashboard</span>
+            <div class="header__avatar">👤</div>
+        </div>
+    </header>
+
+    <!-- ===== MAIN CONTENT ===== -->
+    <main class="dashboard">
+
+        <!-- ── Statistics Overview (NEW) ── -->
+        <section class="stats-row">
+            <div class="stat-card">
+                <div class="stat-card__icon">👥</div>
+                <div class="stat-card__info">
+                    <span class="stat-card__label">Total Patients</span>
+                    <h3 class="stat-card__value" id="statTotalPatients">0</h3>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-card__icon">⏳</div>
+                <div class="stat-card__info">
+                    <span class="stat-card__label">Pending Appts</span>
+                    <h3 class="stat-card__value" id="statPendingAppts">0</h3>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-card__icon">✅</div>
+                <div class="stat-card__info">
+                    <span class="stat-card__label">Confirmed Appts</span>
+                    <h3 class="stat-card__value" id="statConfirmedAppts">0</h3>
+                </div>
+            </div>
+            <div class="stat-card stat-card--critical">
+                <div class="stat-card__icon">⚠️</div>
+                <div class="stat-card__info">
+                    <span class="stat-card__label">Critical Vitals</span>
+                    <h3 class="stat-card__value" id="statCriticalVitals">0</h3>
+                </div>
+            </div>
+        </section>
+
+        <!-- ── Top Row: Three Form Cards ── -->
+        <section class="card-row">
+
+            <!-- Patient Registration -->
+            <div class="card" id="card-register">
+                <h2 class="card__heading"><span class="card__icon">👤</span> Patient Registration</h2>
+                <form id="patientForm" novalidate>
+                    <div class="form-group">
+                        <label for="fullName">Full Name</label>
+                        <input type="text" id="fullName" name="fullName" placeholder="John Doe" required>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group form-group--half">
+                            <label for="age">Age</label>
+                            <input type="number" id="age" name="age" placeholder="25" min="0" max="150" required>
+                        </div>
+                        <div class="form-group form-group--half">
+                            <label for="gender">Gender</label>
+                            <select id="gender" name="gender" required>
+                                <option value="">Select</option>
+                                <option value="Male">Male</option>
+                                <option value="Female">Female</option>
+                                <option value="Other">Other</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="phone">Phone Number</label>
+                        <input type="tel" id="phone" name="phone" placeholder="+1 234 567 890" required>
+                    </div>
+                    <div class="form-group" id="patientError" style="display:none;">
+                        <p class="error-msg"></p>
+                    </div>
+                    <button type="submit" class="btn btn--primary">Register Patient</button>
+                </form>
+            </div>
+
+            <!-- Book Appointment -->
+            <div class="card" id="card-appointment">
+                <h2 class="card__heading"><span class="card__icon">📅</span> Book Appointment</h2>
+                <form id="appointmentForm" novalidate>
+                    <div class="form-group">
+                        <label for="apptPatientId">Patient ID</label>
+                        <input type="text" id="apptPatientId" name="apptPatientId" placeholder="PID-12345" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="doctorName">Doctor Name</label>
+                        <select id="doctorName" name="doctorName" required>
+                            <option value="">Select Doctor</option>
+                            <option value="Dr. Smith">Dr. Smith</option>
+                            <option value="Dr. Jones">Dr. Jones</option>
+                            <option value="Dr. Williams">Dr. Williams</option>
+                            <option value="Dr. Patel">Dr. Patel</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="apptDate">Appointment Date</label>
+                        <input type="date" id="apptDate" name="apptDate" required>
+                    </div>
+                    <div class="form-group" id="appointmentError" style="display:none;">
+                        <p class="error-msg"></p>
+                    </div>
+                    <button type="submit" class="btn btn--primary">Book Appointment</button>
+                </form>
+            </div>
+
+            <!-- Enter Vitals -->
+            <div class="card" id="card-vitals">
+                <h2 class="card__heading"><span class="card__icon">💓</span> Enter Vitals</h2>
+                <form id="vitalsForm" novalidate>
+                    <div class="form-group">
+                        <label for="vitalsPatientId">Patient ID</label>
+                        <input type="text" id="vitalsPatientId" name="vitalsPatientId" placeholder="PID-12345" required>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group form-group--half">
+                            <label for="heartRate">Heart Rate (BPM)</label>
+                            <input type="number" id="heartRate" name="heartRate" placeholder="72" required>
+                        </div>
+                        <div class="form-group form-group--half">
+                            <label for="bloodPressure">BP (mmHg)</label>
+                            <input type="text" id="bloodPressure" name="bloodPressure" placeholder="120/80" required>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="temperature">Temperature (°C)</label>
+                        <input type="number" id="temperature" name="temperature" step="0.1" placeholder="36.5" required>
+                    </div>
+                    <div class="form-group" id="vitalsError" style="display:none;">
+                        <p class="error-msg"></p>
+                    </div>
+                    <button type="submit" class="btn btn--primary">Submit Vitals</button>
+                </form>
+            </div>
+        </section>
+
+        <!-- ── Bottom Row: Activity & Alerts ── -->
+        <section class="activity-row">
+            <div class="activity-row__header">
+                <h2 class="section-title">Recent Activity</h2>
+                <div class="search-box">
+                    <span class="search-box__icon">🔍</span>
+                    <input type="text" id="searchPatient" placeholder="Search by Patient ID...">
+                </div>
+            </div>
+
+            <div class="activity-grid">
+
+                <!-- Upcoming Appointments Table -->
+                <div class="card card--table">
+                    <h3 class="card__sub-heading">Upcoming Appointments</h3>
+                    <div class="table-wrap">
+                        <table id="appointmentsTable">
+                            <thead>
+                                <tr>
+                                    <th>Patient ID</th>
+                                    <th>Doctor</th>
+                                    <th>Date</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>PID-1042</td>
+                                    <td>Dr. Smith</td>
+                                    <td>2023-10-25</td>
+                                    <td><span class="badge badge--confirmed">Confirmed</span></td>
+                                </tr>
+                                <tr>
+                                    <td>PID-1043</td>
+                                    <td>Dr. Jones</td>
+                                    <td>2023-10-26</td>
+                                    <td><span class="badge badge--pending">Pending</span></td>
+                                </tr>
+                                <tr>
+                                    <td>PID-1045</td>
+                                    <td>Dr. Williams</td>
+                                    <td>2023-10-27</td>
+                                    <td><span class="badge badge--confirmed">Confirmed</span></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Recent Vitals Log Table -->
+                <div class="card card--table">
+                    <h3 class="card__sub-heading">Recent Vitals Log</h3>
+                    <div class="table-wrap">
+                        <table id="vitalsTable">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>HR (BPM)</th>
+                                    <th>BP</th>
+                                    <th>Temp (°C)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>PID-1042</td>
+                                    <td>72</td>
+                                    <td>120/80</td>
+                                    <td>36.6</td>
+                                </tr>
+                                <tr>
+                                    <td>PID-1043</td>
+                                    <td class="hr-warning">98</td>
+                                    <td>130/85</td>
+                                    <td>37.0</td>
+                                </tr>
+                                <tr>
+                                    <td>PID-1045</td>
+                                    <td>68</td>
+                                    <td>118/75</td>
+                                    <td>36.4</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Critical Alert Card -->
+                <div class="card card--alert" id="alertCard">
+                    <div class="alert-content">
+                        <div class="alert-icon">⚠️</div>
+                        <h3 class="alert-title">CRITICAL ALERT</h3>
+                        <p class="alert-description" id="alertDescription">
+                            Patient <strong>PID-1002</strong> has reported a critically high heart rate!
+                        </p>
+                        <div class="alert-value" id="alertValue">
+                            Heart Rate: <span class="highlight-red">145 BPM</span>
+                        </div>
+                        <button class="btn btn--danger" id="attendBtn">Attend Immediately</button>
+                    </div>
+                </div>
+
+            </div>
+        </section>
+
+        <!-- ── Success Modal / Toast ── -->
+        <div class="toast" id="toast">
+            <span class="toast__icon">✅</span>
+            <span class="toast__message" id="toastMessage">Submitted successfully!</span>
+        </div>
+
+    </main>
+
+    <script src="script.js"></script>
+</body>
+
+</html>
+</code></pre>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.24.1/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.24.1/components/prism-markup.min.js"></script>
+</body>
+
+</html>

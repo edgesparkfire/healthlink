@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Code View — server.py</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.24.1/themes/prism-tomorrow.min.css" rel="stylesheet" />
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #1a1a1a;
+            color: #fff;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #333;
+            padding-bottom: 10px;
+        }
+
+        .btn {
+            background: #2C8EF8;
+            color: #fff;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        pre {
+            border-radius: 12px;
+            font-size: 14px;
+            background: #2d2d2d !important;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="header">
+        <h2>🐍 server.py (Backend API)</h2>
+        <a href="INDEX.html" class="btn">← Back to Index</a>
+    </div>
+    <pre><code class="language-python">
+"""
+HealthLink — Full Flask Backend (v2)
+=====================================
+- SQLite database (healthlink.db)
+- CORS support
+- Full CRUD for patients, appointments, vitals
+- Doctor management
+- Statistics & search API
+- Audit log
+
+Run:  python server.py
+URL:  http://localhost:5000
+"""
+
+from flask import Flask, request, jsonify, send_from_directory
+import sqlite3, os, datetime, re, json
+
+app = Flask(__name__, static_folder='.', static_url_path='')
+
+DB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'healthlink.db')
+
+
+# ══════════════════════════════════════
+#  DATABASE HELPERS
+# ══════════════════════════════════════
+
+def get_db():
+    """Get a database connection with Row factory."""
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
+
+
+def dict_rows(cursor):
+    """Convert sqlite3.Row objects to plain dicts."""
+    return [dict(row) for row in cursor.fetchall()]
+
+
+def init_db():
+    """Create tables and seed sample data if DB is new."""
+    is_new = not os.path.exists(DB_FILE)
+    conn = get_db()
+    c = conn.cursor()
+
+    c.executescript("""
+        CREATE TABLE IF NOT EXISTS patients (
+            id          TEXT PRIMARY KEY,
+            full_name   TEXT NOT NULL,
+            age         INTEGER CHECK(age >= 0 AND age <= 150),
+            gender      TEXT NOT NULL,
+            phone       TEXT NOT NULL,
+            created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS doctors (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            name        TEXT NOT NULL UNIQUE,
+            specialty   TEXT DEFAULT '',
+            available   INTEGER DEFAULT 1,
+            created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS appointments (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            patient_id  TEXT NOT NULL,
+            doctor_name TEXT NOT NULL,
+            date        TEXT NOT NULL,
+            status      TEXT DEFAULT 'Pending',
+            created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS vitals (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            patient_id      TEXT NOT NULL,
+            heart_rate      REAL CHECK(heart_rate > 40 AND heart_rate < 150),
+            blood_pressure  TEXT NOT NULL,
+            temperature     REAL CHECK(temperature >= 34 AND temperature <= 42),
+            recorded_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS audit_log (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            action      TEXT NOT NULL,
+            entity      TEXT NOT NULL,
+            entity_id   TEXT,
+            details     TEXT,
+            timestamp   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS patient_counter (
+            counter INTEGER DEFAULT 1045
+        );
+    """)
+
+    # Initialize counter if empty
+    row = c.execute("SELECT counter FROM patient_counter").fetchone()
+    if row is None:
+        c.execute("INSERT INTO patient_counter (counter) VALUES (1045)")
+
+    # Seed sample data only on first run
+    if is_new:
+        # Doctors
+        doctors = [
+            ('Dr. Smith', 'General Medicine'),
+            ('Dr. Jones', 'Cardiology'),
+            ('Dr. Williams', 'Neurology'),
+            ('Dr. Patel', 'Pediatrics'),
+        ]
+        c.executemany("INSERT OR IGNORE INTO doctors (name, specialty) VALUES (?, ?)", doctors)
+
+        # Sample appointments
+        appts = [
+            ('PID-1042', 'Dr. Smith', '2023-10-25', 'Confirmed'),
+            ('PID-1043', 'Dr. Jones', '2023-10-26', 'Pending'),
+            ('PID-1045', 'Dr. Williams', '2023-10-27', 'Confirmed'),
+        ]
+        c.executemany("INSERT INTO appointments (patient_id, doctor_name, date, status) VALUES (?, ?, ?, ?)", appts)
+
+        # Sample vitals
+        vitals = [
+            ('PID-1042', 72, '120/80', 36.6),
+            ('PID-1043', 98, '130/85', 37.0),
+            ('PID-1045', 68, '118/75', 36.4),
+        ]
+        c.executemany("INSERT INTO vitals (patient_id, heart_rate, blood_pressure, temperature) VALUES (?, ?, ?, ?)", vitals)
+
+        log_audit(c, 'SEED', 'system', None, 'Initial sample data created')
+
+    conn.commit()
+    conn.close()
+
+
+def log_audit(cursor, action, entity, entity_id=None, details=None):
+    """Write an entry to the audit log."""
+    cursor.execute(
+        "INSERT INTO audit_log (action, entity, entity_id, details) VALUES (?, ?, ?, ?)",
+        (action, entity, entity_id, details)
+    )
+
+
+def next_patient_id(cursor):
+    """Increment and return the next PID."""
+    cursor.execute("UPDATE patient_counter SET counter = counter + 1")
+    row = cursor.execute("SELECT counter FROM patient_counter").fetchone()
+    return f"PID-{row['counter']}"
+
+
+# ══════════════════════════════════════
+#  CORS MIDDLEWARE
+# ══════════════════════════════════════
+
+@app.after_request
+def add_cors(response):
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+    return response
+
+
+# ══════════════════════════════════════
+#  ERROR HANDLER
+# ══════════════════════════════════════
+
+@app.errorhandler(400)
+def bad_request(e):
+    return jsonify({'success': False, 'error': str(e)}), 400
+
+@app.errorhandler(404)
+def not_found(e):
+    return jsonify({'success': False, 'error': 'Resource not found'}), 404
+
+@app.errorhandler(500)
+def server_error(e):
+    return jsonify({'success': False, 'error': 'Internal server error'}), 500
+
+
+# ══════════════════════════════════════
+#  SERVE FRONTEND
+# ══════════════════════════════════════
+
+@app.route('/')
+def index():
+    return send_from_directory('.', 'index.html')
+
+
+# ══════════════════════════════════════
+#  1. PATIENTS — CRUD
+# ══════════════════════════════════════
+
+@app.route('/api/patients', methods=['GET'])
+def get_patients():
+    conn = get_db()
+    patients = dict_rows(conn.execute("SELECT * FROM patients ORDER BY created_at DESC"))
+    conn.close()
+    return jsonify(patients)
+
+
+@app.route('/api/patients', methods=['POST'])
+def register_patient():
+    body = request.get_json() or {}
+    name = (body.get('fullName') or '').strip()
+    age = body.get('age')
+    gender = (body.get('gender') or '').strip()
+    phone = (body.get('phone') or '').strip()
+
+    errors = []
+    if not name:
+        errors.append('Full Name is required.')
+    if age is None or not str(age).isdigit() or int(age) < 0 or int(age) > 150:
+        errors.append('Age must be a number between 0 and 150.')
+    if not gender:
+        errors.append('Gender is required.')
+    if not phone:
+        errors.append('Phone number is required.')
+    if phone and not re.match(r'^[+\d\s()\-]{7,20}$', phone):
+        errors.append('Phone format is invalid.')
+    if errors:
+        return jsonify({'success': False, 'errors': errors}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+    pid = next_patient_id(c)
+    now = datetime.datetime.now().isoformat()
+
+    c.execute(
+        "INSERT INTO patients (id, full_name, age, gender, phone, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (pid, name, int(age), gender, phone, now)
+    )
+    log_audit(c, 'CREATE', 'patient', pid, f'Registered {name}')
+    conn.commit()
+
+    patient = dict(c.execute("SELECT * FROM patients WHERE id = ?", (pid,)).fetchone())
+    conn.close()
+
+    return jsonify({'success': True, 'message': f'Patient registered as {pid}', 'patient': patient}), 201
+
+
+@app.route('/api/patients/<pid>', methods=['DELETE'])
+def delete_patient(pid):
+    conn = get_db()
+    c = conn.cursor()
+    row = c.execute("SELECT * FROM patients WHERE id = ?", (pid.upper(),)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'success': False, 'errors': ['Patient not found.']}), 404
+
+    c.execute("DELETE FROM patients WHERE id = ?", (pid.upper(),))
+    log_audit(c, 'DELETE', 'patient', pid.upper(), f'Deleted patient {pid.upper()}')
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True, 'message': f'Patient {pid.upper()} deleted.'})
+
+
+# ══════════════════════════════════════
+#  2. APPOINTMENTS — CRUD
+# ══════════════════════════════════════
+
+@app.route('/api/appointments', methods=['GET'])
+def get_appointments():
+    conn = get_db()
+    appts = dict_rows(conn.execute("SELECT * FROM appointments ORDER BY date DESC"))
+    conn.close()
+    return jsonify(appts)
+
+
+@app.route('/api/appointments', methods=['POST'])
+def book_appointment():
+    body = request.get_json() or {}
+    patient_id = (body.get('patientId') or '').strip().upper()
+    doctor = (body.get('doctorName') or '').strip()
+    date = (body.get('date') or '').strip()
+
+    errors = []
+    if not patient_id:
+        errors.append('Patient ID is required.')
+    elif not re.match(r'^PID-\d+$', patient_id, re.IGNORECASE):
+        errors.append('Patient ID must be in format PID-XXXXX.')
+    if not doctor:
+        errors.append('Doctor name is required.')
+    if not date:
+        errors.append('Appointment date is required.')
+    else:
+        try:
+            appt_date = datetime.datetime.strptime(date, '%Y-%m-%d').date()
+            if appt_date < datetime.date.today():
+                errors.append('Appointment date cannot be in the past.')
+        except ValueError:
+            errors.append('Invalid date format. Use YYYY-MM-DD.')
+    if errors:
+        return jsonify({'success': False, 'errors': errors}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+    c.execute(
+        "INSERT INTO appointments (patient_id, doctor_name, date, status) VALUES (?, ?, ?, 'Pending')",
+        (patient_id, doctor, date)
+    )
+    appt_id = c.lastrowid
+    log_audit(c, 'CREATE', 'appointment', str(appt_id), f'{patient_id} with {doctor} on {date}')
+    conn.commit()
+
+    appt = dict(c.execute("SELECT * FROM appointments WHERE id = ?", (appt_id,)).fetchone())
+    conn.close()
+
+    return jsonify({'success': True, 'message': f'Appointment booked for {patient_id}', 'appointment': appt}), 201
+
+
+@app.route('/api/appointments/<int:appt_id>', methods=['PUT'])
+def update_appointment(appt_id):
+    body = request.get_json() or {}
+    new_status = (body.get('status') or '').strip()
+
+    if new_status not in ('Pending', 'Confirmed', 'Cancelled'):
+        return jsonify({'success': False, 'errors': ['Status must be Pending, Confirmed, or Cancelled.']}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+    row = c.execute("SELECT * FROM appointments WHERE id = ?", (appt_id,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'success': False, 'errors': ['Appointment not found.']}), 404
+
+    c.execute("UPDATE appointments SET status = ? WHERE id = ?", (new_status, appt_id))
+    log_audit(c, 'UPDATE', 'appointment', str(appt_id), f'Status → {new_status}')
+    conn.commit()
+
+    updated = dict(c.execute("SELECT * FROM appointments WHERE id = ?", (appt_id,)).fetchone())
+    conn.close()
+    return jsonify({'success': True, 'message': 'Appointment updated.', 'appointment': updated})
+
+
+@app.route('/api/appointments/<int:appt_id>', methods=['DELETE'])
+def delete_appointment(appt_id):
+    conn = get_db()
+    c = conn.cursor()
+    row = c.execute("SELECT * FROM appointments WHERE id = ?", (appt_id,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'success': False, 'errors': ['Appointment not found.']}), 404
+
+    c.execute("DELETE FROM appointments WHERE id = ?", (appt_id,))
+    log_audit(c, 'DELETE', 'appointment', str(appt_id), 'Deleted')
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True, 'message': 'Appointment deleted.'})
+
+
+# ══════════════════════════════════════
+#  3. VITALS — CRUD
+# ══════════════════════════════════════
+
+@app.route('/api/vitals', methods=['GET'])
+def get_vitals():
+    conn = get_db()
+    vitals = dict_rows(conn.execute("SELECT * FROM vitals ORDER BY recorded_at DESC"))
+    conn.close()
+    return jsonify(vitals)
+
+
+@app.route('/api/vitals', methods=['POST'])
+def submit_vitals():
+    body = request.get_json() or {}
+    patient_id = (body.get('patientId') or '').strip().upper()
+    hr = body.get('heartRate')
+    bp = (body.get('bloodPressure') or '').strip()
+    temp = body.get('temperature')
+
+    errors = []
+    if not patient_id:
+        errors.append('Patient ID is required.')
+
+    # Heart rate: 40 < HR < 150
+    try:
+        hr_val = float(hr)
+        if hr_val <= 40 or hr_val >= 150:
+            errors.append(f'Heart Rate {hr_val} BPM is outside safe range (40-150).')
+    except (TypeError, ValueError):
+        errors.append('Heart Rate must be a valid number.')
+
+    # Blood pressure format: XXX/XX
+    if not bp:
+        errors.append('Blood Pressure is required.')
+    else:
+        bp_match = re.match(r'^(\d{2,3})\s*/\s*(\d{2,3})$', bp)
+        if not bp_match:
+            errors.append('BP must be in format like 120/80.')
+        else:
+            sys_val = int(bp_match.group(1))
+            dia_val = int(bp_match.group(2))
+            if sys_val < 70 or sys_val > 250:
+                errors.append(f'Systolic {sys_val} is outside range (70-250).')
+            if dia_val < 40 or dia_val > 150:
+                errors.append(f'Diastolic {dia_val} is outside range (40-150).')
+
+    # Temperature: 34–42
+    try:
+        temp_val = float(temp)
+        if temp_val < 34 or temp_val > 42:
+            errors.append(f'Temperature {temp_val}°C is outside safe range (34-42).')
+    except (TypeError, ValueError):
+        errors.append('Temperature must be a valid number.')
+
+    if errors:
+        return jsonify({'success': False, 'errors': errors}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+    now = datetime.datetime.now().isoformat()
+    c.execute(
+        "INSERT INTO vitals (patient_id, heart_rate, blood_pressure, temperature, recorded_at) VALUES (?, ?, ?, ?, ?)",
+        (patient_id, float(hr), bp, float(temp), now)
+    )
+    vital_id = c.lastrowid
+    log_audit(c, 'CREATE', 'vital', str(vital_id), f'{patient_id}: HR={hr}, BP={bp}, T={temp}')
+    conn.commit()
+
+    vital = dict(c.execute("SELECT * FROM vitals WHERE id = ?", (vital_id,)).fetchone())
+    conn.close()
+
+    # Check for critical alert
+    alert = None
+    if float(hr) >= 120 or float(hr) <= 50:
+        alert = {'patientId': patient_id, 'heartRate': float(hr), 'type': 'high' if float(hr) >= 120 else 'low'}
+
+    return jsonify({'success': True, 'message': f'Vitals recorded for {patient_id}', 'vital': vital, 'alert': alert}), 201
+
+
+# ══════════════════════════════════════
+#  4. PATIENT DASHBOARD LOOKUP
+# ══════════════════════════════════════
+
+@app.route('/api/patient/<pid>', methods=['GET'])
+def get_patient_dashboard(pid):
+    conn = get_db()
+    pid_upper = pid.upper()
+
+    patient = conn.execute("SELECT * FROM patients WHERE id = ?", (pid_upper,)).fetchone()
+    patient = dict(patient) if patient else None
+
+    # Map column names to match what frontend expects
+    vitals_raw = dict_rows(conn.execute(
+        "SELECT patient_id as patientId, heart_rate as heartRate, blood_pressure as bloodPressure, temperature, recorded_at as recordedAt FROM vitals WHERE patient_id = ? ORDER BY recorded_at",
+        (pid_upper,)
+    ))
+    appts_raw = dict_rows(conn.execute(
+        "SELECT patient_id as patientId, doctor_name as doctorName, date, status FROM appointments WHERE patient_id = ? ORDER BY date",
+        (pid_upper,)
+    ))
+    conn.close()
+
+    if not patient and not vitals_raw and not appts_raw:
+        return jsonify({'success': False, 'message': f'No records found for {pid_upper}.'}), 404
+
+    # Remap patient dict keys for frontend
+    p = None
+    if patient:
+        p = {'id': patient['id'], 'fullName': patient['full_name'], 'age': patient['age'], 'gender': patient['gender'], 'phone': patient['phone']}
+
+    return jsonify({'success': True, 'patientId': pid_upper, 'patient': p, 'vitals': vitals_raw, 'appointments': appts_raw})
+
+
+# ══════════════════════════════════════
+#  5. DOCTORS — CRUD
+# ══════════════════════════════════════
+
+@app.route('/api/doctors', methods=['GET'])
+def get_doctors():
+    conn = get_db()
+    doctors = dict_rows(conn.execute("SELECT * FROM doctors ORDER BY name"))
+    conn.close()
+    return jsonify(doctors)
+
+
+@app.route('/api/doctors', methods=['POST'])
+def add_doctor():
+    body = request.get_json() or {}
+    name = (body.get('name') or '').strip()
+    specialty = (body.get('specialty') or '').strip()
+
+    if not name:
+        return jsonify({'success': False, 'errors': ['Doctor name is required.']}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+    try:
+        c.execute("INSERT INTO doctors (name, specialty) VALUES (?, ?)", (name, specialty))
+        doc_id = c.lastrowid
+        log_audit(c, 'CREATE', 'doctor', str(doc_id), f'Added {name} ({specialty})')
+        conn.commit()
+        doctor = dict(c.execute("SELECT * FROM doctors WHERE id = ?", (doc_id,)).fetchone())
+        conn.close()
+        return jsonify({'success': True, 'message': f'Doctor {name} added.', 'doctor': doctor}), 201
+    except sqlite3.IntegrityError:
+        conn.close()
+        return jsonify({'success': False, 'errors': ['Doctor already exists.']}), 400
+
+
+@app.route('/api/doctors/<int:doc_id>', methods=['DELETE'])
+def delete_doctor(doc_id):
+    conn = get_db()
+    c = conn.cursor()
+    row = c.execute("SELECT * FROM doctors WHERE id = ?", (doc_id,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'success': False, 'errors': ['Doctor not found.']}), 404
+    c.execute("DELETE FROM doctors WHERE id = ?", (doc_id,))
+    log_audit(c, 'DELETE', 'doctor', str(doc_id), f'Removed {row["name"]}')
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True, 'message': f'Doctor {row["name"]} removed.'})
+
+
+# ══════════════════════════════════════
+#  6. STATISTICS API
+# ══════════════════════════════════════
+
+@app.route('/api/stats', methods=['GET'])
+def get_stats():
+    conn = get_db()
+    c = conn.cursor()
+
+    total_patients = c.execute("SELECT COUNT(*) as c FROM patients").fetchone()['c']
+    total_appointments = c.execute("SELECT COUNT(*) as c FROM appointments").fetchone()['c']
+    pending_appointments = c.execute("SELECT COUNT(*) as c FROM appointments WHERE status = 'Pending'").fetchone()['c']
+    confirmed_appointments = c.execute("SELECT COUNT(*) as c FROM appointments WHERE status = 'Confirmed'").fetchone()['c']
+    total_vitals = c.execute("SELECT COUNT(*) as c FROM vitals").fetchone()['c']
+    total_doctors = c.execute("SELECT COUNT(*) as c FROM doctors").fetchone()['c']
+
+    avg_hr = c.execute("SELECT AVG(heart_rate) as v FROM vitals").fetchone()['v']
+    avg_temp = c.execute("SELECT AVG(temperature) as v FROM vitals").fetchone()['v']
+
+    critical_vitals = c.execute(
+        "SELECT COUNT(*) as c FROM vitals WHERE heart_rate <= 50 OR heart_rate >= 120"
+    ).fetchone()['c']
+
+    conn.close()
+
+    return jsonify({
+        'success': True,
+        'stats': {
+            'totalPatients': total_patients,
+            'totalAppointments': total_appointments,
+            'pendingAppointments': pending_appointments,
+            'confirmedAppointments': confirmed_appointments,
+            'totalVitals': total_vitals,
+            'totalDoctors': total_doctors,
+            'avgHeartRate': round(avg_hr, 1) if avg_hr else 0,
+            'avgTemperature': round(avg_temp, 1) if avg_temp else 0,
+            'criticalVitals': critical_vitals,
+        }
+    })
+
+
+# ══════════════════════════════════════
+#  7. SEARCH API
+# ══════════════════════════════════════
+
+@app.route('/api/search', methods=['GET'])
+def search():
+    q = request.args.get('q', '').strip()
+    if not q:
+        return jsonify({'success': False, 'errors': ['Query parameter q is required.']}), 400
+
+    like = f'%{q}%'
+    conn = get_db()
+
+    patients = dict_rows(conn.execute(
+        "SELECT * FROM patients WHERE id LIKE ? OR full_name LIKE ? OR phone LIKE ?",
+        (like, like, like)
+    ))
+    appointments = dict_rows(conn.execute(
+        "SELECT * FROM appointments WHERE patient_id LIKE ? OR doctor_name LIKE ?",
+        (like, like)
+    ))
+    vitals = dict_rows(conn.execute(
+        "SELECT * FROM vitals WHERE patient_id LIKE ?", (like,)
+    ))
+    doctors = dict_rows(conn.execute(
+        "SELECT * FROM doctors WHERE name LIKE ? OR specialty LIKE ?",
+        (like, like)
+    ))
+
+    conn.close()
+
+    return jsonify({
+        'success': True,
+        'query': q,
+        'results': {
+            'patients': patients,
+            'appointments': appointments,
+            'vitals': vitals,
+            'doctors': doctors,
+        }
+    })
+
+
+# ══════════════════════════════════════
+#  8. AUDIT LOG
+# ══════════════════════════════════════
+
+@app.route('/api/audit', methods=['GET'])
+def get_audit_log():
+    limit = request.args.get('limit', 50, type=int)
+    conn = get_db()
+    logs = dict_rows(conn.execute(
+        "SELECT * FROM audit_log ORDER BY timestamp DESC LIMIT ?", (limit,)
+    ))
+    conn.close()
+    return jsonify(logs)
+
+
+# ══════════════════════════════════════
+#  RESET (dev utility)
+# ══════════════════════════════════════
+
+@app.route('/api/reset', methods=['POST'])
+def reset_data():
+    conn = get_db()
+    c = conn.cursor()
+    for table in ('patients', 'appointments', 'vitals', 'audit_log'):
+        c.execute(f"DELETE FROM {table}")
+    c.execute("UPDATE patient_counter SET counter = 1045")
+    log_audit(c, 'RESET', 'system', None, 'All data cleared')
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True, 'message': 'All data cleared.'})
+
+
+# ══════════════════════════════════════
+#  START SERVER
+# ══════════════════════════════════════
+
+if __name__ == '__main__':
+    init_db()
+    print('\n  HealthLink server (v2) running at: http://localhost:5000')
+    print('  Database: ' + DB_FILE + '\n')
+    app.run(debug=True, port=5000)
+    </code></pre>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.24.1/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.24.1/components/prism-python.min.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>HealthLink Code Viewer — Master Index</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #f0f4f8;
+            color: #2c3e50;
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .container {
+            background: #fff;
+            padding: 40px;
+            border-radius: 20px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+            max-width: 600px;
+            width: 100%;
+            text-align: center;
+        }
+
+        h1 {
+            color: #2C8EF8;
+            margin-bottom: 30px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            text-align: left;
+        }
+
+        .category {
+            grid-column: 1 / span 2;
+            font-weight: 800;
+            margin-top: 20px;
+            border-bottom: 2px solid #eef2f6;
+            padding-bottom: 5px;
+            color: #7f8c9a;
+            text-transform: uppercase;
+            font-size: 12px;
+            letter-spacing: 1px;
+        }
+
+        .link-card {
+            display: block;
+            background: #f8fbff;
+            padding: 15px;
+            border-radius: 12px;
+            text-decoration: none;
+            color: #2c3e50;
+            font-weight: 600;
+            border: 1px solid #e2e8f0;
+            transition: all 0.2s;
+        }
+
+        .link-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 4px 15px rgba(44, 142, 248, 0.15);
+            border-color: #2C8EF8;
+            color: #2C8EF8;
+        }
+
+        .link-card span {
+            font-size: 20px;
+            margin-right: 10px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>💙 HealthLink Code Viewer</h1>
+        <p>Select a component below to view its source code in your browser.</p>
+
+        <div class="grid">
+            <div class="category">Backend</div>
+            <a href="View_Server.html" class="link-card"><span>🐍</span> server.py</a>
+
+            <div class="category">Admin Dashboard</div>
+            <a href="View_Admin_Main.html" class="link-card"><span>📄</span> index.html</a>
+            <a href="View_Admin_Styles.html" class="link-card"><span>🎨</span> style.css</a>
+            <a href="View_Admin_Scripts.html" class="link-card"><span>📜</span> script.js</a>
+
+            <div class="category">Patient Dashboard</div>
+            <a href="View_Patient_Main.html" class="link-card"><span>📄</span> patient-dash.html</a>
+            <a href="View_Patient_Styles.html" class="link-card"><span>🎨</span> patient-dash.css</a>
+            <a href="View_Patient_Scripts.html" class="link-card"><span>📜</span> patient-dash.js</a>
+        </div>
+    </div>
+</body>
+
+</html>
